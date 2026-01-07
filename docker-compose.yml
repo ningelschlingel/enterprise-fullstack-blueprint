@@ -1,0 +1,186 @@
+name: blueprint
+
+services:
+  # 1. THE ENTRY POINT
+  proxy:
+    image: nginx:alpine
+    container_name: blueprint-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro # link nginx conf; configures routing
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+      keycloak:
+        condition: service_healthy
+
+  # 2. FRONTEND (Angular)
+  frontend:
+    container_name: blueprint-ui
+    build:
+      context: ./blueprint-ui
+    expose:
+      - "80"
+
+  # 3. BACKEND (Spring Boot)
+  backend:
+    container_name: blueprint-api
+    build:
+      context: ./blueprint-api
+    expose:
+      - "8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db-app:${APP_DB_PORT}/${APP_DB_NAME}
+      - SPRING_DATASOURCE_USERNAME=${APP_DB_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${APP_DB_PASSWORD}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=http://${DOMAIN_NAME}/auth/realms/blueprint # route how keycloak is accessed from outside
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://${KC_INTERNAL_HOST}:9090/auth/realms/blueprint/protocol/openid-connect/certs # internal route with ip
+      - SERVER_SERVLET_CONTEXT_PATH=/
+      - JWT_SECRET=${JWT_SECRET}
+      - APP_DB_HOST=${APP_DB_HOST}
+    depends_on:
+      db-app:
+        condition: service_healthy
+
+  # 4. DATABASE FOR BACKEND
+  db-app:
+    image: postgres:16-alpine
+    container_name: blueprint-db-app
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: blueprint
+      POSTGRES_USER: application
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+    volumes:
+      - ./db/scripts:/docker-entrypoint-initdb.d
+      - pgdata_app:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U application -d blueprint"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 5. DATABASE FOR KEYCLOAK
+  db-keycloak:
+    image: postgres:16-alpine
+    container_name: blueprint-db-keycloak
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KC_DB_NAME}
+      POSTGRES_USER: ${KC_DB_USERNAME}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
+    volumes:
+      - pgdata_keycloak:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 6. KEYCLOAK
+  keycloak:
+    container_name: blueprint-keycloak
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --import-realm
+    expose:
+      - "9090"
+    volumes:
+      - ./keycloak/config/realm-export.json:/opt/keycloak/data/import/realm.json
+      - ./keycloak/themes:/opt/keycloak/themes
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db-keycloak:${KC_DB_PORT}/${KC_DB_NAME}
+      KC_DB_USERNAME: ${KC_DB_USERNAME}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_HTTP_PORT: 9090
+      KC_HOSTNAME: ${DOMAIN_NAME}
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded # Essential for the proxy!
+      KC_PROXY: edge
+      KC_HTTP_RELATIVE_PATH: /auth
+    depends_on:
+      db-keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /auth/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; cat <&3 | grep 'HTTP/1.1 200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # 7. UTILS
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: blueprint-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@test.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      APP_DB_HOST: db-app
+      APP_DB_PORT: ${APP_DB_PORT}
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USERNAME}
+      APP_DB_PASS: ${APP_DB_PASSWORD}
+      KC_DB_PORT: ${KC_DB_PORT}
+      KC_DB_NAME: ${KC_DB_NAME}
+      KC_DB_USER: ${KC_DB_USERNAME}
+      KC_DB_PASS: ${KC_DB_PASSWORD}
+      PGPASSFILE: /var/lib/pgadmin/pgpass
+    user: root
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        # 1. Write to the EXACT path defined in your servers.json
+        # Using /var/lib/pgadmin/pgpass is cleaner
+        echo "db-app:$${APP_DB_PORT}:$${APP_DB_NAME}:$${APP_DB_USER}:$${APP_DB_PASS}" > /var/lib/pgadmin/pgpass
+        echo "db-keycloak:$${KC_DB_PORT}:$${KC_DB_NAME}:$${KC_DB_USER}:$${KC_DB_PASS}" >> /var/lib/pgadmin/pgpass
+        
+        # Set permissions
+        chown 5050:5050 /var/lib/pgadmin/pgpass
+        chmod 600 /var/lib/pgadmin/pgpass
+
+        exec /entrypoint.sh
+    volumes:
+      - ./db/pgadmin/servers.json:/pgadmin4/servers.json
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db-app
+      - db-keycloak
+
+  dozzle:
+    container_name: blueprint-dozzle
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Discovery engine
+    ports:
+      - "8888:8080" # Access at <domain>:8888
+    environment:
+      - DOZZLE_LEVEL=info
+      - DOZZLE_ENABLE_ACTIONS=true # Allows Stop/Start/Restart via UI
+
+  mailpit:
+    container_name: blueprint-mailpit
+    image: axllent/mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  pgdata_app:
+  pgdata_keycloak:
+  pgadmin_data:

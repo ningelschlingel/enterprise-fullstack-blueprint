@@ -1,0 +1,31 @@
+package io.ningelschlingel.blueprint_api.config.security;
+
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.stereotype.Component;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Component
+public class JwtRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
+    @Override
+    public Collection<GrantedAuthority> convert(Jwt jwt) {
+        Map<String, Object> realmAccess = jwt.getClaim("realm_access");
+        
+        if (realmAccess == null || realmAccess.isEmpty() || !(realmAccess.get("roles") instanceof List)) {
+            return List.of();
+        }
+
+        return ((List<?>) realmAccess.get("roles")).stream()
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .map(roleName -> "ROLE_" + roleName) // Spring expects "ROLE_" prefix for hasRole()
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toList());
+    }
+}

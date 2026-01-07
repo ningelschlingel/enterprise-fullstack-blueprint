@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: blueprint-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/blueprint
+    username: blueprint
+    password: blueprint
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true

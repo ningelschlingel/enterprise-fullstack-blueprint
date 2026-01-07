@@ -1,0 +1,65 @@
+.pf-v5-c-button.pf-m-primary {
+    /* This overrides the base blue color for almost everything primary */
+    --pf-v5-global--primary-color--100: #1d4721;
+    --pf-v5-global--primary-color--200: #153a1a; /* A slightly darker shade for hover */
+    
+    /* This targets the button's specific background variable directly */
+    --pf-v5-c-button--m-primary--BackgroundColor: #1d4721;
+    --pf-v5-c-button--m-primary--hover--BackgroundColor: #153a1a;
+}
+
+.login-pf body {
+    background-color: #ffefea !important; /* Test with a bright color first */
+    background-image: none !important;
+}
+
+#kc-header {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding-top: 20px; /* Optional: adds space above the logo */
+}
+
+#kc-header-wrapper {
+    /* Ensures the inner wrapper doesn't force it back to the left */
+    font-size: 0; /* Removes potential text ghosting if only using an image */
+    text-align: center;
+}
+
+#kc-header-wrapper {
+    /* Ensures the inner wrapper doesn't force it back to the left */
+    font-size: 0; /* Removes potential text ghosting if only using an image */
+    text-align: center;
+    content: url('../img/logo.svg'); /* Your Corporate Logo */
+    max-width: 500px;
+    margin: 1.5rem 0;
+}
+
+.pf-v5-c-login__main {
+    border-radius: 0.5em;
+}
+
+input {
+    border-radius: 0.5em;
+}
+
+:where(.pf-v5-theme-dark) .pf-v5-c-form-control {
+    border-radius: 0.5em;
+}
+
+.pf-v5-c-button.pf-m-control {
+    border-radius: 0.5em;
+}
+
+.pf-v5-c-form-control:after {
+    border-radius: 0.5em;
+}
+
+.pf-v5-c-button.pf-m-control {
+    margin: 0 0 0 10px;
+}
+
+.pf-v5-c-button.pf-m-control:after {
+    border-radius: 0.5em;
+}
